@@ -1,0 +1,10 @@
+# HPCL B2B Lead Discovery & Recommendation System
+flask>=3.0.0
+requests>=2.31.0
+feedparser>=6.0.0
+beautifulsoup4>=4.12.0
+python-dotenv>=1.0.0
+scikit-learn>=1.3.0
+numpy>=1.24.0
+nltk>=3.8.0
+joblib>=1.3.0
