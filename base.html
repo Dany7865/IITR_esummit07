@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}HPCL Lead Intelligence{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <a href="{{ url_for('home') }}" class="logo">
+        <img src="{{ url_for('static', filename='img.png') }}" alt="HPCL" class="logo-img"> HPCL Lead Intelligence
+      </a>
+      <nav class="nav">
+        <a href="{{ url_for('home') }}">Dashboard</a>
+        <a href="{{ url_for('map_view') }}">Heat Map</a>
+        <a href="{{ url_for('notifications_inbox') }}">Notifications</a>
+        <a href="{{ url_for('discover') }}">Run Discovery</a>
+        <a href="/api/leads">API</a>
+        <a href="{{ url_for('logout') }}">Logout</a>
+      </nav>
+      <div class="header-actions">
+        <button id="theme-toggle" title="Toggle light / dark">🌗</button>
+      </div>
+    </div>
+  </header>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <p>HPCL B2B Lead Discovery · REST/OData-ready for SAP integration</p>
+  </footer>
+  <script>
+  // Theme toggle: persists in localStorage as 'hpcl_theme' = 'dark'|'light'
+  (function(){
+    const btn = document.getElementById('theme-toggle');
+    const apply = (theme)=>{
+      if(theme === 'light') document.documentElement.setAttribute('data-theme','light');
+      else document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('hpcl_theme', theme);
+      if(btn) btn.textContent = theme === 'light' ? '🌞' : '🌗';
+    };
+    const saved = localStorage.getItem('hpcl_theme') || 'dark';
+    apply(saved);
+    if(btn){
+      btn.addEventListener('click', ()=>{
+        const cur = localStorage.getItem('hpcl_theme') || 'dark';
+        apply(cur === 'dark' ? 'light' : 'dark');
+      });
+    }
+  })();
+  </script>
+</body>
+</html>

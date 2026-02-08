@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.company }} – Lead Dossier{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ lead.company or '—' }}</h1>
+  <p><strong>Industry:</strong> {{ lead.industry or '—' }} &nbsp; <strong>Source:</strong> {{ lead.source or '—' }} &nbsp; <strong>Status:</strong> {{ lead.status }}</p>
+  <p><strong>Score:</strong> {{ lead.score }}% &nbsp; <strong>Confidence:</strong> {{ lead.confidence }}% &nbsp; <strong>Intent:</strong> {{ lead.intent_score or 0 }}/100
+     {% if lead.propensity_score is not none %}&nbsp; <strong>Propensity to convert:</strong> {{ "%.0f"|format((lead.propensity_score or 0) * 100) }}%{% endif %}
+  </p>
+    <p><strong>Freshness:</strong> {{ lead.freshness_score if lead.freshness_score is not none else '—' }}% &nbsp; <strong>Age:</strong> {{ lead.age_days if lead.age_days is not none else '—' }} day(s)</p>
+  <p><strong>Recommended products:</strong> {{ (lead.product_recommendations or [])|join(', ') or '—' }}</p>
+  {% if lead.source_url %}<p><a href="{{ lead.source_url }}" target="_blank" rel="noopener">Source link</a></p>{% endif %}
+  {% if lead.status == 'New' %}
+  <a href="{{ url_for('assign', id=lead.id) }}" class="btn btn-primary">Accept Lead</a>
+  <a href="{{ url_for('reject', id=lead.id) }}" class="btn btn-danger">Not Relevant</a>
+  {% elif lead.status == 'Assigned' %}
+  <a href="{{ url_for('convert', id=lead.id) }}" class="btn btn-primary">Mark Converted</a>
+  {% endif %}
+  <button id="wa-send-btn" class="btn btn-secondary">Send WhatsApp</button>
+</div>
+
+<div class="card dossier-section">
+  <h3>Summary</h3>
+  <p>{{ lead.summary or '—' }}</p>
+  <h3>Requirement clues</h3>
+  <ul>
+    {% for c in (lead.requirement_clues or [])[:10] %}<li>{{ c }}</li>{% endfor %}
+  </ul>
+  {% if lead.product_reasoning %}
+  <h3>Why this product</h3>
+  <p>{{ lead.product_reasoning }}</p>
+  {% endif %}
+</div>
+
+<div class="card dossier-section">
+  <h3>Signal fingerprint</h3>
+  <p style="color: var(--muted); font-size: 0.9rem;">Events detected → HPCL products and reasoning (Knowledge Graph)</p>
+  <ul class="signal-list">
+    {% for s in (lead.signal_fingerprint or []) %}
+    <li>
+      <strong>{{ s.event }}</strong> → {{ s.products|join(', ') }}<br>
+      <span style="color: var(--muted); font-size: 0.9rem;">{{ s.reasoning }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if not (lead.signal_fingerprint or []) %}
+  <p style="color: var(--muted);">No specific signals extracted.</p>
+  {% endif %}
+</div>
+
+{% set why = (lead.why_hpcl or {}) %}
+<div class="card dossier-section">
+  <h3>Why HPCL? (Battlecard)</h3>
+  <p><strong>{{ why.primary_headline or 'Why HPCL' }}</strong></p>
+  <ul>
+    {% for point in (why.primary_points or []) %}<li>{{ point }}</li>{% endfor %}
+  </ul>
+  <p><strong>CTA:</strong> {{ why.primary_cta or '—' }}</p>
+</div>
+
+<div class="card dossier-section">
+  <h3>Suggested actions</h3>
+  <ul>
+    {% for a in (lead.suggested_actions or []) %}<li>{{ a }}</li>{% endfor %}
+  </ul>
+</div>
+
+{% if lead.sales_pitch_script %}
+<div class="card dossier-section">
+  <h3>Sales pitch script</h3>
+  <div class="pitch-script">{{ lead.sales_pitch_script }}</div>
+</div>
+{% endif %}
+
+<p><a href="{{ url_for('home') }}" class="btn btn-secondary">← Back to Dashboard</a></p>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const btn = document.getElementById('wa-send-btn');
+  if(!btn) return;
+  btn.addEventListener('click', async function(){
+    const phone = prompt('Phone number to send to (international, e.g. +91xxxx):', '');
+    if(phone === null) return; // cancelled
+    btn.disabled = true; btn.textContent = 'Sending...';
+    try{
+      const res = await fetch(`/api/whatsapp/send-buttons/{{ lead.id }}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({to: phone})
+      });
+      const j = await res.json();
+      if(j && j.ok){
+        alert('WhatsApp message sent (API accepted).');
+      } else {
+        alert('WhatsApp send failed.');
+      }
+    }catch(e){
+      alert('Error sending WhatsApp: '+e);
+    }
+    btn.disabled = false; btn.textContent = 'Send WhatsApp';
+  });
+});
+</script>
+{% endblock %}

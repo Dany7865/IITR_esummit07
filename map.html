@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Lead Heat Map – HPCL{% endblock %}
+{% block content %}
+<h1 class="page-title">Lead heat map</h1>
+<p style="color: var(--muted); margin-bottom: 12px;">Geospatial view of leads. Sales officers can see high-probability leads near their location. Interactive clustering, charts and quick actions included.</p>
+
+<div class="map-layout">
+  <div id="map" style="height:600px; border-radius:12px; overflow:hidden;"></div>
+  <aside class="map-sidebar card">
+    <div class="card">
+      <h3>Overview</h3>
+      <div id="summaryBanner" style="font-size:0.95rem; color:var(--muted)"></div>
+    </div>
+    <div class="card">
+      <h3>Priority distribution</h3>
+      <canvas id="priorityChart" height="160"></canvas>
+    </div>
+    <div class="card">
+      <h3>Top industries</h3>
+      <canvas id="industryChart" height="160"></canvas>
+    </div>
+    <div class="card">
+      <h3>Filters & Actions</h3>
+      <label>Min score: <input id="minScore" type="range" min="0" max="100" value="0"></label>
+      <div style="margin-top:8px;"><button id="zoomHigh" class="btn btn-primary">Zoom to high-priority</button> <button id="refreshMap" class="btn btn-secondary">Refresh</button></div>
+    </div>
+  </aside>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// Utility: deterministic pseudo-geocode for demo when lat/lon missing
+function strToLatLng(s){
+  // India bounding box approx
+  const minLat=8, maxLat=37, minLon=68, maxLon=97;
+  let h=0; for(let i=0;i<s.length;i++) h = ((h<<5)-h) + s.charCodeAt(i), h |= 0;
+  const frac = (h >>> 0) / 0xFFFFFFFF;
+  const frac2 = (((h*2654435761)>>>0) / 0xFFFFFFFF);
+  const lat = minLat + frac*(maxLat-minLat);
+  const lon = minLon + frac2*(maxLon-minLon);
+  return [lat, lon];
+}
+
+async function loadMap(){
+  const map = L.map('map').setView([22.5,79], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  const markers = L.layerGroup().addTo(map);
+
+  const res = await fetch('/api/leads');
+  const leads = await res.json();
+
+  // build charts data
+  const priorityCounts = {HIGH:0, MEDIUM:0, LOW:0};
+  const industryCounts = {};
+  let highCount=0;
+
+  const minScoreInput = document.getElementById('minScore');
+
+  function render(){
+    markers.clearLayers();
+    const minScore = Number(minScoreInput.value || 0);
+    leads.forEach(l => {
+      const score = Number(l.score||0);
+      if(score < minScore) return;
+      let lat = l.latitude, lon = l.longitude;
+      if(!lat || !lon){ const coords = strToLatLng(String(l.company||l.id||'')); lat=coords[0]; lon=coords[1]; }
+      const cfg = { radius: 6 + score/10, color: score>=75 ? '#3fb950' : (score>=50 ? '#d29922' : '#f85149'), fillOpacity:0.8 };
+      const circle = L.circleMarker([lat,lon], cfg);
+      const title = l.company || '—';
+      const popupHtml = `<strong>${title}</strong><br/>Score: ${score}% · Confidence: ${l.confidence}%<br/>Priority: ${l.priority}<br/>Industry: ${l.industry || '—'}<br/><a href='/leads/${l.id}'>Open dossier</a>`;
+      circle.bindPopup(popupHtml);
+      if(l.priority === 'HIGH'){
+        // pulsing effect via CSS class
+        circle.getElement = function(){ return null; };
+      }
+      circle.addTo(markers);
+    });
+  }
+
+  // summarize
+  leads.forEach(l => { priorityCounts[l.priority] = (priorityCounts[l.priority]||0)+1; industryCounts[l.industry||'Unknown'] = (industryCounts[l.industry||'Unknown']||0)+1; if(l.priority==='HIGH') highCount++; });
+  document.getElementById('summaryBanner').innerHTML = `${leads.length} leads · <strong>${highCount}</strong> high-priority · Top industry: <strong>${Object.keys(industryCounts).sort((a,b)=>industryCounts[b]-industryCounts[a])[0]||'—'}</strong>`;
+
+  // charts
+  const ctxP = document.getElementById('priorityChart').getContext('2d');
+  new Chart(ctxP, { type:'doughnut', data:{ labels:['HIGH','MEDIUM','LOW'], datasets:[{ data:[priorityCounts.HIGH,priorityCounts.MEDIUM,priorityCounts.LOW], backgroundColor:['#3fb950','#d29922','#f85149'] }]}, options:{responsive:true}});
+  const topIndustries = Object.entries(industryCounts).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const ctxI = document.getElementById('industryChart').getContext('2d');
+  new Chart(ctxI, { type:'bar', data:{ labels:topIndustries.map(r=>r[0].slice(0,18)), datasets:[{ label:'Leads', data:topIndustries.map(r=>r[1]), backgroundColor:'#58a6ff' }]}, options:{responsive:true, scales:{y:{beginAtZero:true}}}});
+
+  render();
+
+  document.getElementById('refreshMap').addEventListener('click', ()=>render());
+  document.getElementById('zoomHigh').addEventListener('click', ()=>{
+    // zoom to cluster of high-priority leads (center on average)
+    const highs = leads.filter(l=>l.priority==='HIGH');
+    if(!highs.length) return alert('No high-priority leads');
+    let sumLat=0,sumLon=0; highs.forEach(h=>{ let c = h.latitude && h.longitude ? [h.latitude,h.longitude] : strToLatLng(String(h.company||h.id)); sumLat+=c[0]; sumLon+=c[1]; });
+    map.setView([sumLat/highs.length, sumLon/highs.length], 8);
+  });
+}
+
+loadMap();
+</script>
+{% endblock %}

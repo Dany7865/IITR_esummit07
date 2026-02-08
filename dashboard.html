@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – HPCL Lead Intelligence{% endblock %}
+{% block content %}
+<h1 class="page-title">Lead Dashboard</h1>
+<p style="color: var(--muted); margin-bottom: 20px;">Procurement signals from tenders, news, and industry sources. Entity resolution and ML propensity applied.</p>
+<!-- Hero KPI / wow section -->
+<div class="hero">
+  <div class="hero-card">
+    <div class="hero-title">Total Leads</div>
+    <div class="hero-value" id="kpi-total">—</div>
+  </div>
+  <div class="hero-card">
+    <div class="hero-title">High Priority</div>
+    <div class="hero-value" id="kpi-high">—</div>
+  </div>
+  <div class="hero-card">
+    <div class="hero-title">Avg Score</div>
+    <div class="hero-value" id="kpi-avg">—</div>
+  </div>
+  <div class="hero-card">
+    <div class="hero-title">Avg Freshness</div>
+    <div class="hero-value" id="kpi-fresh">—</div>
+  </div>
+</div>
+<div class="compare-controls">
+  <button id="compareBtn" class="compare-btn">Compare selected leads</button>
+  <button id="clearSel" class="compare-clear">Clear selection</button>
+  <div class="limit-hint">Select up to <strong id="limit">5</strong> leads to compare</div>
+</div>
+<div class="compare-controls">
+  <input id="searchCompany" placeholder="Search company..." style="padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); width:280px">
+  <input id="searchSignal" placeholder="Filter by signal / product..." style="padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); width:260px">
+  <button id="compareBtn" class="compare-btn">Compare selected leads</button>
+  <button id="clearSel" class="compare-clear">Clear selection</button>
+  <div class="limit-hint">Select up to <strong id="limit">5</strong> leads to compare</div>
+</div>
+
+<div class="lead-grid" id="leadGrid">
+  {% for d in leads %}
+  <div class="lead-card">
+    <div class="card-badges">
+      <span class="badge priority-{{ d.priority|lower }}">{{ d.priority }}</span>
+      <span class="badge freshness">{{ d.freshness_score if d.freshness_score is not none else '—' }}%</span>
+      <span class="score-circle">{{ d.score }}%</span>
+    </div>
+    <label><input type="checkbox" class="compare-check" data-id="{{ d.id }}"> <h2 style="display:inline"><a href="{{ url_for('lead_dossier', id=d.id) }}">{{ d.company or '—' }}</a></h2></label>
+    <p><strong>Industry:</strong> {{ d.industry or '—' }} &nbsp; <strong>Products:</strong> {{ (d.product_recommendations or [])|join(', ') or '—' }}</p>
+    <p><strong>Score:</strong> {{ d.score }}% &nbsp; <strong>Confidence:</strong> {{ d.confidence }}% &nbsp; <strong>Intent:</strong> {{ d.intent_score or 0 }}/100
+       {% if d.propensity_score is not none %}<span style="color: var(--muted);"> · Propensity: {{ "%.0f"|format((d.propensity_score or 0) * 100) }}%</span>{% endif %}
+    </p>
+    <p><strong>Priority:</strong> <span class="priority-{{ d.priority|lower }}">{{ d.priority }}</span> &nbsp; <strong>Status:</strong> {{ d.status }}</p>
+    <p class="clues">{{ (d.requirement_clues or [])[:3]|join(' · ') or '—' }}</p>
+    <p class="clues">{{ (d.summary or '')[:120] }}{% if (d.summary or '')|length > 120 %}…{% endif %}</p>
+    {% if d.status == 'New' %}
+    <a href="{{ url_for('assign', id=d.id) }}" class="btn btn-primary">Accept Lead</a>
+    <a href="{{ url_for('reject', id=d.id) }}" class="btn btn-danger">Not Relevant</a>
+    {% elif d.status == 'Assigned' %}
+    <a href="{{ url_for('convert', id=d.id) }}" class="btn btn-primary">Mark Converted</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% if not leads %}
+<p style="color: var(--muted);">No leads yet. <a href="{{ url_for('discover') }}">Run discovery</a> to fetch from news and tenders.</p>
+{% endif %}
+
+<!-- Comparison modal -->
+<div id="compareModal" class="compare-modal" role="dialog" aria-hidden="true">
+  <div class="modal-content">
+    <button class="modal-close" id="closeModal">✕</button>
+    <h3>Lead comparison</h3>
+    <canvas id="compareChart" height="220"></canvas>
+    <div class="compare-legend" id="compareLegend"></div>
+  </div>
+</div>
+
+<script>
+// Hero KPI loader for visual impact
+(async function(){
+  try{
+    const res = await fetch('/api/leads?limit=1000');
+    const leads = await res.json();
+    const total = leads.length;
+    const high = leads.filter(l=> (l.priority||'').toUpperCase()==='HIGH').length;
+    const avg = leads.reduce((s,l)=>s+(Number(l.score||0)),0) / Math.max(1,total);
+    const avgFresh = leads.reduce((s,l)=>s+(Number(l.freshness_score||0)||0),0) / Math.max(1,total);
+    // animate counters
+    const ease = (t)=>1 - Math.pow(1-t,3);
+    function animate(el, from, to, ms=800){
+      const start = performance.now();
+      const step = (now)=>{
+        const p = Math.min(1,(now-start)/ms);
+        el.textContent = Math.round(from + (to-from)*ease(p));
+        if(p<1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+    animate(document.getElementById('kpi-total'), 0, total, 900);
+    animate(document.getElementById('kpi-high'), 0, high, 900);
+    animate(document.getElementById('kpi-avg'), 0, Math.round(avg), 900);
+    animate(document.getElementById('kpi-fresh'), 0, Math.round(avgFresh), 900);
+  }catch(e){ console.warn('KPI load failed', e); }
+})();
+
+(() => {
+  const limit = 5;
+  const compareBtn = document.getElementById('compareBtn');
+  const clearBtn = document.getElementById('clearSel');
+  const checks = document.querySelectorAll('.compare-check');
+  const modal = document.getElementById('compareModal');
+  const closeModal = document.getElementById('closeModal');
+  const limitEl = document.getElementById('limit');
+  limitEl.textContent = limit;
+
+  function selectedIds(){
+    return Array.from(document.querySelectorAll('.compare-check:checked')).map(i=>i.dataset.id);
+  }
+  
+  // Filtering: company and signal/product
+  const searchCompany = document.getElementById('searchCompany');
+  const searchSignal = document.getElementById('searchSignal');
+  const leadGrid = document.getElementById('leadGrid');
+
+  function applyFilters(){
+    const q = (searchCompany.value || '').trim().toLowerCase();
+    const s = (searchSignal.value || '').trim().toLowerCase();
+    let visible = 0;
+    document.querySelectorAll('.lead-card').forEach(card => {
+      const txt = (card.textContent || '').toLowerCase();
+      const matchQ = q ? txt.indexOf(q) !== -1 : true;
+      const matchS = s ? txt.indexOf(s) !== -1 : true;
+      if(matchQ && matchS){
+        card.style.display = '';
+        visible += 1;
+      } else {
+        card.style.display = 'none';
+        // uncheck hidden selection
+        const cb = card.querySelector('.compare-check'); if(cb) cb.checked = false;
+      }
+    });
+    if(visible === 0){
+      if(!document.getElementById('noMatches')){
+        const p = document.createElement('p'); p.id='noMatches'; p.style.color='var(--muted)'; p.textContent='No leads match your filters.'; leadGrid.parentNode.insertBefore(p, leadGrid.nextSibling);
+      }
+    } else {
+      const nm = document.getElementById('noMatches'); if(nm) nm.remove();
+    }
+  }
+
+  searchCompany.addEventListener('input', applyFilters);
+  searchSignal.addEventListener('input', applyFilters);
+
+  clearBtn.addEventListener('click', ()=>{ document.querySelectorAll('.compare-check:checked').forEach(c=>c.checked=false); });
+
+  compareBtn.addEventListener('click', async ()=>{
+    const ids = selectedIds();
+    if(ids.length < 2){ alert('Select at least 2 leads to compare.'); return; }
+    if(ids.length > limit){ alert('Select up to '+limit+' leads.'); return; }
+    // fetch all leads and filter client-side (API returns full list)
+    const res = await fetch('/api/leads');
+    const all = await res.json();
+    const picks = all.filter(l => ids.includes(String(l.id)));
+    showComparison(picks);
+  });
+
+  closeModal.addEventListener('click', ()=>{ modal.classList.remove('active'); modal.setAttribute('aria-hidden','true'); });
+
+  let chart = null;
+  function showComparison(leads){
+    modal.classList.add('active'); modal.setAttribute('aria-hidden','false');
+    const labels = leads.map(l=> (l.company || '—').slice(0,24));
+    const scores = leads.map(l=> Number(l.score || 0));
+    const confs = leads.map(l=> Number(l.confidence || 0));
+    const props = leads.map(l=> Number((l.propensity_score||0)*100));
+    const datasets = [
+      { label:'Score', data: scores, backgroundColor:'rgba(88,166,255,0.6)' },
+      { label:'Confidence', data: confs, backgroundColor:'rgba(63,185,80,0.6)' }
+    ];
+    if(props.some(v=>v>0)) datasets.push({ label:'Propensity (%)', data: props, backgroundColor:'rgba(210,153,34,0.6)' });
+
+    const ctx = document.getElementById('compareChart').getContext('2d');
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: { responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } }
+    });
+    // legend
+    const legend = document.getElementById('compareLegend'); legend.innerHTML='';
+    datasets.forEach(ds=>{ const div=document.createElement('div'); div.className='item'; div.textContent=ds.label; legend.appendChild(div); });
+  }
+})();
+</script>
+{% endblock %}
